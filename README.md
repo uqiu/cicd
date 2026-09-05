@@ -203,15 +203,23 @@ console, but the **secret** is shown once at creation — generate a new client
 
 ## This repository is private
 
-A reusable workflow in a private repository has to grant access to its callers:
-**Settings → Actions → General → Access → "Accessible from repositories owned
-by the user uqiu"**. Without it, every caller fails to even start with a
-workflow-not-found error.
+A reusable workflow in a private repository is invisible to other repositories
+until it grants them access. Run this once, signed in as the owner:
 
-Making this repository public would remove that setting and the class of
-confusion that comes with it — nothing in here is secret, only the shape of the
-pipeline. The secrets themselves live on the server and in each repository's
-encrypted store either way.
+```bash
+scripts/allow-callers.sh
+```
+
+That's the API behind **Settings → Actions → General → Access → "Accessible
+from repositories owned by the user uqiu"**, if you'd rather click it. Without
+it, every caller fails with *"workflow was not found"* before running a single
+step — which reads like a typo in the `uses:` line rather than a permission, so
+it is worth doing before the first deploy.
+
+Making this repository public would retire that setting and the confusion with
+it — nothing in here is secret, only the shape of the pipeline. The secrets
+themselves live on the server and in each repository's encrypted store either
+way. `allow-callers.sh` notices and tells you there's nothing to do.
 
 ## When a deploy fails
 
