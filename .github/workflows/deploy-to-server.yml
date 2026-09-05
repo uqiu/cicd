@@ -9,7 +9,7 @@
 #     uses: uqiu/cicd/.github/workflows/deploy-to-server.yml@main
 #     with:
 #       dir: ~/myproject
-#       health-url: http://127.0.0.1:8930/healthz
+#       health-url: http://127.0.0.1:8080/healthz
 #     secrets: inherit
 #
 # Most projects want ship.yml instead, which builds the image and then calls

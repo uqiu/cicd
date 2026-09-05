@@ -20,7 +20,7 @@
 #       uses: uqiu/cicd/.github/workflows/ship.yml@main
 #       with:
 #         dir: ~/myproject
-#         health-url: http://127.0.0.1:8930/healthz
+#         health-url: http://127.0.0.1:8080/healthz
 #         tag: ${{ inputs.tag }}
 #       secrets: inherit
 #

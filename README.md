@@ -54,7 +54,7 @@ jobs:
     uses: uqiu/cicd/.github/workflows/ship.yml@main
     with:
       dir: ~/myproject                    # where it lives on the server
-      health-url: http://127.0.0.1:8930/healthz
+      health-url: http://127.0.0.1:8080/healthz
       tag: ${{ inputs.tag }}
     secrets: inherit
 ```
@@ -147,7 +147,7 @@ TS_OAUTH_CLIENT_ID=k123...
 TS_OAUTH_SECRET=tskey-client-...
 EOF
 chmod 600 ~/.deploy-secrets/env
-cp ~/.ssh/hub_deploy ~/.deploy-secrets/ssh_key   # optional; see below
+cp ~/.ssh/deploy_ed25519 ~/.deploy-secrets/ssh_key   # optional; see below
 chmod 600 ~/.deploy-secrets/ssh_key
 ```
 
@@ -209,25 +209,25 @@ console, but the **secret** is shown once at creation — generate a new client
 5. **A Tailscale OAuth client** scoped to `tag:ci`, for the runner to join the
    tailnet.
 
-## This repository is private
+## Why this repository is public
 
-A reusable workflow in a private repository is invisible to other repositories
-until it grants them access. Run this once, signed in as the owner:
+Not by preference — by requirement. A reusable workflow in a **private**
+repository can only be called from other **private** repositories. The
+"Accessible from repositories owned by the user" setting doesn't change that;
+it grants access among private repositories only. A public caller gets
+*"workflow was not found"* and fails before running a single step, which reads
+like a typo in the `uses:` line rather than a permission problem.
 
-```bash
-scripts/allow-callers.sh
-```
+Since at least one project here is public, this repository has to be public for
+that project to use it. Private callers can call a public reusable workflow
+with no setting at all, so public serves everything.
 
-That's the API behind **Settings → Actions → General → Access → "Accessible
-from repositories owned by the user uqiu"**, if you'd rather click it. Without
-it, every caller fails with *"workflow was not found"* before running a single
-step — which reads like a typo in the `uses:` line rather than a permission, so
-it is worth doing before the first deploy.
+Nothing here is secret — only the shape of the pipeline. The values live on the
+server in `~/.deploy-secrets` and in each repository's encrypted secret store,
+neither of which is in git.
 
-Making this repository public would retire that setting and the confusion with
-it — nothing in here is secret, only the shape of the pipeline. The secrets
-themselves live on the server and in each repository's encrypted store either
-way. `allow-callers.sh` notices and tells you there's nothing to do.
+`scripts/allow-callers.sh` remains for the day this goes private again (it
+flips the access policy, and says there's nothing to do while this is public).
 
 ## When a deploy fails
 
@@ -237,11 +237,9 @@ way. `allow-callers.sh` notices and tells you there's nothing to do.
   `tag:ci → server:22`, or `sshd` isn't listening on the tailscale interface.
 - **Health check times out** — the container logs are printed in the same step.
   The service is likely up but slow, or the image is broken.
-- **Workflow not found** — the access setting above, or a typo in the `uses:`
-  line. A private callee with access not granted fails before any step runs.
-
-## Users
-
-| Project | Directory on the server | Health |
-|---|---|---|
-| [forge](https://github.com/uqiu/forge) | `~/forge` | `:8081/api/health` |
+- **Workflow not found** — a typo in the `uses:` line, or the visibility rule
+  above: a public repository cannot call a private repository's reusable
+  workflow. Either way it fails before any step runs, so there are no logs.
+- **`Unable to resolve action ... runner`** — `ubuntu-24.04-arm` on a private
+  repository. Those runners are free for public repositories only; drop the
+  `runner` input and it builds on x86 under QEMU.
