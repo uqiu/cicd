@@ -1,0 +1,8 @@
+name: Probe vars in with
+on:
+  workflow_dispatch:
+jobs:
+  call:
+    uses: ./.github/workflows/_probe-leaf.yml
+    with:
+      s: ${{ vars.PROBE_ABSENT || 'fallback' }}

@@ -1,0 +1,16 @@
+name: Probe mid
+on:
+  workflow_call:
+    inputs:
+      n:
+        type: number
+        default: 60
+      b:
+        type: boolean
+        default: true
+jobs:
+  call:
+    uses: ./.github/workflows/_probe-leaf.yml
+    with:
+      n: ${{ inputs.n }}
+      b: ${{ inputs.b }}

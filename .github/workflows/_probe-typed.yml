@@ -1,0 +1,6 @@
+name: Probe typed passthrough
+on:
+  workflow_dispatch:
+jobs:
+  call:
+    uses: ./.github/workflows/_probe-mid.yml
