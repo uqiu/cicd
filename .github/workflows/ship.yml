@@ -17,6 +17,9 @@
 #       uses: ./.github/workflows/ci.yml
 #     ship:
 #       needs: test
+#       permissions:          # required — see the note above the publish job
+#         contents: read
+#         packages: write
 #       uses: uqiu/cicd/.github/workflows/ship.yml@main
 #       with:
 #         dir: ~/myproject
@@ -104,6 +107,11 @@ on:
 jobs:
   publish:
     runs-on: ${{ inputs.runner }}
+    # A called workflow's permissions are capped by the calling job's, so this
+    # block can only narrow — never grant. `packages: write` therefore has to
+    # be on the caller's `ship:` job too, or the whole run is rejected before
+    # any job starts, with no message that names the permission. Keeping it
+    # here as well is what makes the token read-only for `contents`.
     permissions:
       contents: read
       packages: write

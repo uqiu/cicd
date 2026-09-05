@@ -51,6 +51,14 @@ jobs:
 
   ship:
     needs: test
+    # Not optional. A called workflow can't hold a permission its caller
+    # doesn't, and pushing to GHCR needs `packages: write` — which the default
+    # read-only token doesn't have. Leave this out and the run ends in three
+    # seconds with "this run likely failed because of a workflow file issue"
+    # and no other clue.
+    permissions:
+      contents: read
+      packages: write
     uses: uqiu/cicd/.github/workflows/ship.yml@main
     with:
       dir: ~/myproject                    # where it lives on the server
@@ -237,6 +245,13 @@ flips the access policy, and says there's nothing to do while this is public).
   `tag:ci → server:22`, or `sshd` isn't listening on the tailscale interface.
 - **Health check times out** — the container logs are printed in the same step.
   The service is likely up but slow, or the image is broken.
+- **"This run likely failed because of a workflow file issue", 3 seconds, no
+  jobs, no annotation** — almost always the `permissions:` block missing from
+  the caller's `ship:` job. A called workflow can't hold a permission its
+  caller lacks, so `publish`'s request for `packages: write` is refused before
+  the run starts. The API exposes nothing for these, so bisecting is the only
+  way to find any other cause: strip the calling job down to `uses:` and add
+  the keys back one at a time.
 - **Workflow not found** — a typo in the `uses:` line, or the visibility rule
   above: a public repository cannot call a private repository's reusable
   workflow. Either way it fails before any step runs, so there are no logs.
