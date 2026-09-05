@@ -51,14 +51,6 @@ jobs:
 
   ship:
     needs: test
-    # Not optional. A called workflow can't hold a permission its caller
-    # doesn't, and pushing to GHCR needs `packages: write` — which the default
-    # read-only token doesn't have. Leave this out and the run ends in three
-    # seconds with "this run likely failed because of a workflow file issue"
-    # and no other clue.
-    permissions:
-      contents: read
-      packages: write
     uses: uqiu/cicd/.github/workflows/ship.yml@main
     with:
       dir: ~/myproject                    # where it lives on the server
@@ -67,12 +59,26 @@ jobs:
     secrets: inherit
 ```
 
-**2. The secrets.** Easiest on the server, where the store lives and `gh` is
-signed in as the owner:
+**2. The one command.** Easiest on the server, where the store lives and `gh`
+is signed in as the owner:
 
 ```bash
 scripts/seed-deploy-secrets.sh uqiu/myproject
 ```
+
+That sets the six secrets and raises the repository's default `GITHUB_TOKEN` to
+read-write, which is the one thing the workflow above can't do for itself: a
+called workflow's permissions are capped by the calling job's and can only
+narrow, so `ship.yml` can't be handed `packages: write` unless the caller
+already has it. Doing it as a repository setting is what keeps a `permissions:`
+block out of the workflow. `scripts/allow-package-push.sh uqiu/myproject` is
+that half on its own, and explains the trade-off in its header.
+
+It's a ceiling, not a grant — the workflows here still pin their own tokens
+down (`publish` to `contents: read` plus `packages: write`, `deploy` to
+nothing). But give any *other* workflow in the project an explicit
+`permissions:` block, or it will now get a read-write token by default; tests
+want `contents: read`.
 
 **3. The server: nothing.** The first deploy clones the repository into `dir`
 itself. That works over anonymous HTTPS, so a private repository still needs
@@ -166,6 +172,9 @@ is already signed in as the owner, which is what setting secrets needs anyway:
 scripts/seed-deploy-secrets.sh uqiu/myproject
 ```
 
+It finishes by raising that repository's default token to read-write, for the
+reason under "Adding a project" — secrets are only half of what a caller needs.
+
 From a laptop, `--from` reads the store over SSH and is remembered:
 
 ```bash
@@ -246,12 +255,12 @@ flips the access policy, and says there's nothing to do while this is public).
 - **Health check times out** — the container logs are printed in the same step.
   The service is likely up but slow, or the image is broken.
 - **"This run likely failed because of a workflow file issue", 3 seconds, no
-  jobs, no annotation** — almost always the `permissions:` block missing from
-  the caller's `ship:` job. A called workflow can't hold a permission its
-  caller lacks, so `publish`'s request for `packages: write` is refused before
-  the run starts. The API exposes nothing for these, so bisecting is the only
-  way to find any other cause: strip the calling job down to `uses:` and add
-  the keys back one at a time.
+  jobs, no annotation** — `scripts/allow-package-push.sh` hasn't been run on
+  the project. A called workflow can't hold a permission its caller lacks, so
+  `publish`'s request for `packages: write` is refused before the run starts.
+  The API exposes nothing at all for a startup failure — no logs, no
+  annotation, no reason — so bisecting is the only way to find any other cause:
+  strip the calling job down to `uses:` and add the keys back one at a time.
 - **Workflow not found** — a typo in the `uses:` line, or the visibility rule
   above: a public repository cannot call a private repository's reusable
   workflow. Either way it fails before any step runs, so there are no logs.

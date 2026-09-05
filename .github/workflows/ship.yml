@@ -17,9 +17,6 @@
 #       uses: ./.github/workflows/ci.yml
 #     ship:
 #       needs: test
-#       permissions:          # required — see the note above the publish job
-#         contents: read
-#         packages: write
 #       uses: uqiu/cicd/.github/workflows/ship.yml@main
 #       with:
 #         dir: ~/myproject
@@ -107,11 +104,17 @@ on:
 jobs:
   publish:
     runs-on: ${{ inputs.runner }}
-    # A called workflow's permissions are capped by the calling job's, so this
-    # block can only narrow — never grant. `packages: write` therefore has to
-    # be on the caller's `ship:` job too, or the whole run is rejected before
-    # any job starts, with no message that names the permission. Keeping it
-    # here as well is what makes the token read-only for `contents`.
+    # A called workflow's permissions are capped by the calling job's and can
+    # only narrow, never grant — so `packages: write` has to already be in the
+    # caller's token. It is: `scripts/allow-package-push.sh` sets the caller's
+    # default to read-write once, when the project is added, which is what
+    # keeps a `permissions:` block out of every project's workflow. That makes
+    # this block the narrowing, not the grant: it is why the build runs with a
+    # token that can push a package and nothing else.
+    #
+    # If a run ever dies in three seconds having started no jobs, with only
+    # "this run likely failed because of a workflow file issue" and no
+    # annotation, that script hasn't been run on the caller.
     permissions:
       contents: read
       packages: write

@@ -72,6 +72,13 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Nothing here touches the GitHub API: there is no checkout, the tailnet
+    # joins with its own OAuth secrets, and the server clones over anonymous
+    # HTTPS. So the token gets no scopes at all. Callers are set up to hand out
+    # a read-write one by default (see scripts/allow-package-push.sh), which
+    # makes declaring this the difference between a deploy holding nothing and
+    # a deploy holding write access to the whole repository.
+    permissions: {}
     steps:
       # The server sits behind NAT with no public entrance. Once the runner
       # joins the tailnet it can SSH in as if it were on the LAN.

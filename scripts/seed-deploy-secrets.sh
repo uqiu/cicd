@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Copies the home-server deploy secrets into a repository.
+# Sets a repository up to deploy: the home-server secrets, and — by way of
+# allow-package-push.sh — the token ceiling its `ship:` job needs.
 #
 #   scripts/seed-deploy-secrets.sh uqiu/myproject                    # on the server
 #   scripts/seed-deploy-secrets.sh uqiu/myproject --from me@server   # from a laptop
@@ -35,6 +36,11 @@
 # --from reads it over SSH and is remembered in
 # ~/.config/deploy-secrets.source, so later runs are just the repository name.
 # DEPLOY_SECRETS_ENV names a local env file instead, skipping the store.
+#
+# Ends by running allow-package-push.sh on the same repository, so the project's
+# workflow needs no `permissions:` block of its own. That one is a repository
+# setting rather than a secret, but it needs the same ADMIN and the same person,
+# so this is the place for it.
 set -euo pipefail
 
 REPO=''
@@ -42,7 +48,7 @@ FROM=''
 while [ $# -gt 0 ]; do
   case $1 in
     --from) FROM=${2:-}; shift 2 ;;
-    -h | --help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) REPO=$1; shift ;;
   esac
@@ -164,4 +170,12 @@ set_secret DEPLOY_USER "$DEPLOY_USER"
 
 echo
 echo "✅ six secrets set on $REPO"
-echo "   Next: point the project's workflow at ship.yml — see the README."
+
+# The other half of what a caller needs, and the half nothing in the workflow
+# file can do for itself. Run here so adding a project is one command; it is
+# idempotent, and it explains itself if it can't do it.
+echo
+"$(dirname "$0")/allow-package-push.sh" "$REPO"
+
+echo
+echo "Next: point the project's workflow at ship.yml — see the README."
