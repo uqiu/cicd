@@ -19,7 +19,7 @@
 #       needs: test
 #       uses: uqiu/cicd/.github/workflows/ship.yml@main
 #       with:
-#         dir: ~/myproject
+#         dir: /root/app/myproject
 #         health-url: http://127.0.0.1:8080/healthz
 #         tag: ${{ inputs.tag }}
 #       secrets: inherit
@@ -35,7 +35,7 @@ on:
     inputs:
       # ── where it runs on the server ──────────────────────────────────────
       dir:
-        description: Directory on the server holding the compose file.
+        description: Absolute path on the server holding the compose file.
         required: true
         type: string
       compose-dir:

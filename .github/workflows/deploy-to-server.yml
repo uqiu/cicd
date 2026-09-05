@@ -8,7 +8,7 @@
 #     needs: publish
 #     uses: uqiu/cicd/.github/workflows/deploy-to-server.yml@main
 #     with:
-#       dir: ~/myproject
+#       dir: /root/app/myproject
 #       health-url: http://127.0.0.1:8080/healthz
 #     secrets: inherit
 #
@@ -25,7 +25,10 @@ on:
   workflow_call:
     inputs:
       dir:
-        description: Directory on the server holding the compose file (a git checkout is synced first, if it is one).
+        description: >-
+          Absolute path on the server holding the compose file (a git checkout
+          is synced first, if it is one). Absolute because it is substituted
+          into a double-quoted `cd` below, where a leading `~` is not expanded.
         required: true
         type: string
       compose-dir:

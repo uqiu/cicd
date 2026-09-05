@@ -3,9 +3,6 @@
 Shared deployment pipeline for my projects, all of which run as containers on
 the same Armbian box at home, behind NAT, reachable over Tailscale.
 
-Adding deployment to a project is a workflow file, one command, and nothing on
-the server.
-
 ```
 push / merge to main
    ↓
@@ -25,7 +22,25 @@ image, so its CPU never compiles anything.
 
 ## Adding a project
 
-**1. The workflow.** `.github/workflows/release.yml` in the project:
+The server and the secret store are one-time setup and already done — the two
+sections near the bottom cover them for the day the box gets rebuilt. Per
+project it is a file, a command, and a push.
+
+### What the project needs first
+
+| | |
+|---|---|
+| `Dockerfile` | At the repository root, or point the `dockerfile` input at it |
+| `compose.yaml` | Runs the published image: `image: ghcr.io/uqiu/<repo>:latest` |
+| a health endpoint | Anything cheap that answers 200 once the app is up |
+| `.github/workflows/ci.yml` | The project's own tests, with `on: workflow_call` so `release.yml` can call them |
+
+Bind the port to `127.0.0.1` in compose and pick one nothing else on the box
+uses, so only the reverse proxy and the tailnet can reach it.
+
+### 1. The workflow file
+
+`.github/workflows/release.yml` in the project, copied as-is:
 
 ```yaml
 name: Publish and deploy
@@ -47,45 +62,81 @@ concurrency:
 
 jobs:
   test:
-    uses: ./.github/workflows/ci.yml      # the project's own tests
+    uses: ./.github/workflows/ci.yml           # the project's own tests
 
   ship:
     needs: test
     uses: uqiu/cicd/.github/workflows/ship.yml@main
     with:
-      dir: ~/myproject                    # where it lives on the server
+      dir: /root/app/myproject                 # absolute, not ~/myproject
       health-url: http://127.0.0.1:8080/healthz
+      runner: ubuntu-24.04-arm                 # public repositories only
       tag: ${{ inputs.tag }}
     secrets: inherit
 ```
 
-**2. The one command.** Easiest on the server, where the store lives and `gh`
-is signed in as the owner:
+That is the whole file. No `permissions:`, no secret plumbing, no build
+configuration — step 2 is what makes that possible. Adjust `dir`,
+`health-url`, `runner`, and see the inputs table for the rest.
+
+**`dir` has to be an absolute path.** It is substituted into a double-quoted
+`cd` on the server, where a leading `~` is not expanded, so `~/myproject` looks
+for a directory literally named `~`.
+
+### 2. One command
+
+On the server, where the store lives and `gh` is already signed in as the
+owner:
 
 ```bash
 scripts/seed-deploy-secrets.sh uqiu/myproject
 ```
 
-That sets the six secrets and raises the repository's default `GITHUB_TOKEN` to
-read-write, which is the one thing the workflow above can't do for itself: a
-called workflow's permissions are capped by the calling job's and can only
-narrow, so `ship.yml` can't be handed `packages: write` unless the caller
-already has it. Doing it as a repository setting is what keeps a `permissions:`
-block out of the workflow. `scripts/allow-package-push.sh uqiu/myproject` is
-that half on its own, and explains the trade-off in its header.
+It does the two things the workflow file cannot do for itself:
 
-It's a ceiling, not a grant — the workflows here still pin their own tokens
-down (`publish` to `contents: read` plus `packages: write`, `deploy` to
-nothing). But give any *other* workflow in the project an explicit
-`permissions:` block, or it will now get a read-write token by default; tests
-want `contents: read`.
+- sets the six secrets — see "The six secrets"
+- raises the repository's default `GITHUB_TOKEN` to read-write
 
-**3. The server: nothing.** The first deploy clones the repository into `dir`
-itself. That works over anonymous HTTPS, so a private repository still needs
-one manual `git clone` on the server — after that the deploy takes over.
+The second is the non-obvious one. A called workflow's permissions are capped by
+the calling job's and can only narrow, never grant, so `ship.yml` cannot be
+handed the `packages: write` it needs to push the image unless the caller
+already has it. As a repository setting that is done once and forgotten; as a
+`permissions:` block it would be three lines in every project, and forgetting
+them fails in the least readable way GitHub has — see the last section.
+`scripts/allow-package-push.sh uqiu/myproject` is that half on its own.
 
-Pick a port nothing else on the box uses and bind it to `127.0.0.1` in compose,
-so only the reverse proxy and the tailnet can reach it.
+It raises a *ceiling*, not a grant: the workflows here still pin their own
+tokens down (`publish` to `contents: read` plus `packages: write`, `deploy` to
+nothing at all), so a deploy holds no more than it did before.
+
+**One consequence to handle:** every *other* workflow in the project now gets a
+read-write token unless it says otherwise, so give each an explicit
+`permissions:` block. Tests want `contents: read`.
+
+### 3. Push to main
+
+The first run builds the image, pushes it, clones the repository into `dir` on
+the server by itself, and starts it. Nothing to do on the server — with one
+exception, below.
+
+Watch it once, since a first deploy is where a wrong port or a missing health
+endpoint shows up:
+
+```bash
+gh run watch -R uqiu/myproject --exit-status
+```
+
+### Public or private
+
+The one property of the project that changes any of the above:
+
+| | public project | private project |
+|---|---|---|
+| `runner:` | `ubuntu-24.04-arm` — free, and builds aarch64 natively | omit it; builds on x86 under QEMU, several times slower |
+| `diagnostics:` | leave it off — Actions logs are world-readable and `tailscale status` lists every device on the tailnet | safe to set `true` |
+| first deploy | `auto-clone` handles it | anonymous HTTPS cannot clone it, so `git clone` into `dir` once by hand |
+| the image | public; the server pulls anonymously | private; the server needs `docker login ghcr.io` (see server setup) |
+| Actions minutes | free | billed against the monthly quota |
 
 ## The two workflows
 
@@ -99,7 +150,7 @@ defaults:
 
 | Input | Default | Notes |
 |---|---|---|
-| `dir` | — | Directory on the server holding the compose file |
+| `dir` | — | Directory on the server holding the compose file. Absolute. |
 | `health-url` | — | Polled from inside the server after the restart |
 | `compose-dir` | `.` | When compose.yaml isn't at the top of `dir` |
 | `auto-clone` | `true` | Clone on the server when `dir` is missing (public repos) |
@@ -107,29 +158,22 @@ defaults:
 | `context` | `.` | Docker build context |
 | `dockerfile` | `Dockerfile` | Path from the repository root |
 | `platforms` | `linux/arm64` | The server is aarch64 |
-| `runner` | `ubuntu-latest` | See below |
+| `runner` | `ubuntu-latest` | See "Public or private" |
 | `build-args` | — | Extra args, one per line. `VERSION` is always passed |
 | `tag` | — | Extra image tag besides `latest` |
 | `diagnostics` | `false` | Print `tailscale status` on the deploy |
 
-**Public repositories should set `runner: ubuntu-24.04-arm`.** GitHub's arm64
-runners are free for public repositories and build aarch64 natively; the
-default x86 runner emulates it under QEMU, which is several times slower.
-Private repositories don't get them for free, hence the default.
-
-**Leave `diagnostics` off in a public repository.** Actions logs there are
-world-readable, and `tailscale status` lists every device on the tailnet.
-
 Every build is tagged with its commit sha as well as `latest`, so a rollback
-has something to pin: `image: ghcr.io/uqiu/<repo>:<sha>` in compose.
+has something to pin: `image: ghcr.io/uqiu/<repo>:<sha>` in compose. A manual
+run of `release.yml` is also the way to redeploy without a code change.
 
 Calls are pinned at `@main` rather than a tag, so a fix here reaches every
 project on its next run with nothing to re-commit. The trade is that a mistake
 here reaches every project too — this repository has no tests, so read twice.
 
-## The secrets
+## The six secrets
 
-Six, the same values for every project:
+The same values for every project:
 
 | Secret | What it is |
 |---|---|
@@ -150,7 +194,7 @@ that already has them, so they have to live somewhere you control.
 
 That somewhere is the server. You can read it over SSH, a new laptop needs no
 setup, and the runner — which must never read it — can't, because reaching the
-server is precisely what these secrets unlock. Set it up once:
+server is precisely what these secrets unlock. Set the store up once:
 
 ```bash
 mkdir -p ~/.deploy-secrets && chmod 700 ~/.deploy-secrets
@@ -165,17 +209,8 @@ cp ~/.ssh/deploy_ed25519 ~/.deploy-secrets/ssh_key   # optional; see below
 chmod 600 ~/.deploy-secrets/ssh_key
 ```
 
-Run on the server, the script finds that directory by itself — and `gh` there
-is already signed in as the owner, which is what setting secrets needs anyway:
-
-```bash
-scripts/seed-deploy-secrets.sh uqiu/myproject
-```
-
-It finishes by raising that repository's default token to read-write, for the
-reason under "Adding a project" — secrets are only half of what a caller needs.
-
-From a laptop, `--from` reads the store over SSH and is remembered:
+Run on the server, the script finds that directory by itself. From a laptop,
+`--from` reads the store over SSH and is remembered:
 
 ```bash
 scripts/seed-deploy-secrets.sh uqiu/myproject --from me@my-server
@@ -199,6 +234,8 @@ console, but the **secret** is shown once at creation — generate a new client
 `ssh-copy-id` put in the server's `authorized_keys`.
 
 ## One-time server setup
+
+Already done on the current box; here for the next one.
 
 1. **Docker**
 
@@ -241,21 +278,17 @@ with no setting at all, so public serves everything.
 
 Nothing here is secret — only the shape of the pipeline. The values live on the
 server in `~/.deploy-secrets` and in each repository's encrypted secret store,
-neither of which is in git.
+neither of which is in git. Note that a project's own Actions logs are where
+runtime detail would leak, and those follow the project's visibility, not this
+repository's.
 
 `scripts/allow-callers.sh` remains for the day this goes private again (it
 flips the access policy, and says there's nothing to do while this is public).
 
 ## When a deploy fails
 
-- **`tailscaled is NeedsLogin, not Running`** — the OAuth client is invalid or
-  `tag:ci` isn't in the tailnet policy file.
-- **SSH times out but the tailnet check passed** — the ACL doesn't allow
-  `tag:ci → server:22`, or `sshd` isn't listening on the tailscale interface.
-- **Health check times out** — the container logs are printed in the same step.
-  The service is likely up but slow, or the image is broken.
-- **"This run likely failed because of a workflow file issue", 3 seconds, no
-  jobs, no annotation** — `scripts/allow-package-push.sh` hasn't been run on
+- **"This run likely failed because of a workflow file issue", three seconds,
+  no jobs, no annotation** — `scripts/allow-package-push.sh` hasn't been run on
   the project. A called workflow can't hold a permission its caller lacks, so
   `publish`'s request for `packages: write` is refused before the run starts.
   The API exposes nothing at all for a startup failure — no logs, no
@@ -267,3 +300,11 @@ flips the access policy, and says there's nothing to do while this is public).
 - **`Unable to resolve action ... runner`** — `ubuntu-24.04-arm` on a private
   repository. Those runners are free for public repositories only; drop the
   `runner` input and it builds on x86 under QEMU.
+- **`tailscaled is NeedsLogin, not Running`** — the OAuth client is invalid or
+  `tag:ci` isn't in the tailnet policy file.
+- **SSH times out but the tailnet check passed** — the ACL doesn't allow
+  `tag:ci → server:22`, or `sshd` isn't listening on the tailscale interface.
+- **`cd: ~/myproject: No such file or directory`**, or a directory named `~`
+  appears on the server — `dir` was given as `~/…`. Use an absolute path.
+- **Health check times out** — the container logs are printed in the same step.
+  The service is likely up but slow, or the image is broken.
