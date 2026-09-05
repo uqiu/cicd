@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copies the home-server deploy secrets into a repository.
 #
-#   scripts/seed-deploy-secrets.sh uqiu/myproject
-#   scripts/seed-deploy-secrets.sh uqiu/myproject --from me@my-server
+#   scripts/seed-deploy-secrets.sh uqiu/myproject                    # on the server
+#   scripts/seed-deploy-secrets.sh uqiu/myproject --from me@server   # from a laptop
 #
 # GitHub's Actions secrets are write-only — the API takes a value encrypted
 # with the repository's public key and never hands one back, so `gh secret
@@ -30,9 +30,11 @@
 # server adds little exposure — that key only opens the machine an attacker
 # would already be on — and it means a new laptop needs nothing but SSH access.
 #
-# --from is remembered in ~/.config/deploy-secrets.source, so later runs are
-# just the repository name. Set DEPLOY_SECRETS_ENV to a local file to skip the
-# server entirely.
+# Run on the server, this finds that directory by itself; gh there is signed in
+# as the owner anyway, which is what setting secrets needs. Run anywhere else,
+# --from reads it over SSH and is remembered in
+# ~/.config/deploy-secrets.source, so later runs are just the repository name.
+# DEPLOY_SECRETS_ENV names a local env file instead, skipping the store.
 set -euo pipefail
 
 REPO=''
@@ -52,7 +54,8 @@ if [ -z "$REPO" ]; then
 fi
 
 SOURCE_FILE=$HOME/.config/deploy-secrets.source
-REMOTE_DIR=${DEPLOY_SECRETS_DIR:-'~/.deploy-secrets'}
+STORE_DIR=${DEPLOY_SECRETS_DIR:-'~/.deploy-secrets'}
+LOCAL_STORE=${STORE_DIR/#\~/$HOME}
 
 # Everything read out of the store lands in one 700 directory that is deleted
 # on the way out, however we exit — nothing sensitive is left in /tmp.
@@ -72,23 +75,31 @@ if [ -n "${DEPLOY_SECRETS_ENV:-}" ]; then
     exit 1
   fi
   cp "$DEPLOY_SECRETS_ENV" "$WORK/env"
+elif [ -z "$FROM" ] && [ -f "$LOCAL_STORE/env" ]; then
+  # Running on the server itself — the common case, since that is where the
+  # store lives and where gh is signed in as the owner. No SSH hop needed.
+  echo "Reading the secret store from $LOCAL_STORE"
+  cp "$LOCAL_STORE/env" "$WORK/env"
+  [ -f "$LOCAL_STORE/ssh_key" ] && cp "$LOCAL_STORE/ssh_key" "$WORK/ssh_key"
 else
   if [ -z "$FROM" ] && [ -f "$SOURCE_FILE" ]; then
     FROM=$(tr -d '[:space:]' < "$SOURCE_FILE")
   fi
   if [ -z "$FROM" ]; then
-    echo "Don't know where the secrets live. Pass --from user@host once and" >&2
-    echo "it will be remembered in $SOURCE_FILE." >&2
+    echo "Don't know where the secrets live." >&2
+    echo "  On the server:  create $STORE_DIR/env (see the header of this script)" >&2
+    echo "  Anywhere else:  pass --from user@host once; it will be remembered" >&2
+    echo "                  in $SOURCE_FILE." >&2
     exit 1
   fi
-  echo "Reading the secret store from $FROM:$REMOTE_DIR"
-  if ! ssh -o BatchMode=yes "$FROM" "cat $REMOTE_DIR/env" > "$WORK/env" 2>/dev/null; then
-    echo "Couldn't read $REMOTE_DIR/env on $FROM." >&2
+  echo "Reading the secret store from $FROM:$STORE_DIR"
+  if ! ssh -o BatchMode=yes "$FROM" "cat $STORE_DIR/env" > "$WORK/env" 2>/dev/null; then
+    echo "Couldn't read $STORE_DIR/env on $FROM." >&2
     echo "Are you on the tailnet, and does the file exist? (see the header of this script)" >&2
     exit 1
   fi
   # Optional: the key may live on the server too.
-  ssh -o BatchMode=yes "$FROM" "cat $REMOTE_DIR/ssh_key" > "$WORK/ssh_key" 2>/dev/null || true
+  ssh -o BatchMode=yes "$FROM" "cat $STORE_DIR/ssh_key" > "$WORK/ssh_key" 2>/dev/null || true
   [ -s "$WORK/ssh_key" ] || rm -f "$WORK/ssh_key"
   mkdir -p "$(dirname "$SOURCE_FILE")"
   printf '%s\n' "$FROM" > "$SOURCE_FILE"
@@ -109,7 +120,7 @@ if [ -f "$WORK/ssh_key" ]; then
 elif [ -n "${DEPLOY_SSH_KEY_FILE:-}" ]; then
   KEY_FILE=${DEPLOY_SSH_KEY_FILE/#\~/$HOME}
 else
-  echo "No SSH key: neither $REMOTE_DIR/ssh_key nor DEPLOY_SSH_KEY_FILE." >&2
+  echo "No SSH key: neither $STORE_DIR/ssh_key nor DEPLOY_SSH_KEY_FILE in the env file." >&2
   exit 1
 fi
 if [ ! -f "$KEY_FILE" ]; then

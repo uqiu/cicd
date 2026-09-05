@@ -59,7 +59,8 @@ jobs:
     secrets: inherit
 ```
 
-**2. The secrets.**
+**2. The secrets.** Easiest on the server, where the store lives and `gh` is
+signed in as the owner:
 
 ```bash
 scripts/seed-deploy-secrets.sh uqiu/myproject
@@ -150,7 +151,14 @@ cp ~/.ssh/hub_deploy ~/.deploy-secrets/ssh_key   # optional; see below
 chmod 600 ~/.deploy-secrets/ssh_key
 ```
 
-Then, from any machine with SSH access to it:
+Run on the server, the script finds that directory by itself — and `gh` there
+is already signed in as the owner, which is what setting secrets needs anyway:
+
+```bash
+scripts/seed-deploy-secrets.sh uqiu/myproject
+```
+
+From a laptop, `--from` reads the store over SSH and is remembered:
 
 ```bash
 scripts/seed-deploy-secrets.sh uqiu/myproject --from me@my-server
