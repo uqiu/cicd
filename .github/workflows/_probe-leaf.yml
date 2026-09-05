@@ -14,5 +14,8 @@ on:
 jobs:
   echo:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - run: echo "s=${{ inputs.s }} n=${{ inputs.n }} b=${{ inputs.b }}"
