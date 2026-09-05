@@ -31,12 +31,46 @@ project it is a file, a command, and a push.
 | | |
 |---|---|
 | `Dockerfile` | At the repository root, or point the `dockerfile` input at it |
-| `compose.yaml` | Runs the published image: `image: ghcr.io/uqiu/<repo>:latest` |
-| a health endpoint | Anything cheap that answers 200 once the app is up |
+| a compose file | Any name `docker compose` accepts. Runs the published image: `image: ghcr.io/uqiu/<repo>:latest` |
+| a health endpoint | Anything cheap that answers 200 once the app is up. `health-url` polls it. |
+| a `HEALTHCHECK` | In the Dockerfile, hitting that same endpoint. Not required by the pipeline; add it anyway. |
 | `.github/workflows/ci.yml` | The project's own tests, with `on: workflow_call` so `release.yml` can call them |
 
 Bind the port to `127.0.0.1` in compose and pick one nothing else on the box
 uses, so only the reverse proxy and the tailnet can reach it.
+
+### The healthcheck
+
+The deploy already polls `health-url`, so this looks redundant. It isn't — the
+two answer different questions. The workflow asks *did this deploy work*, once,
+and then the run ends. The image's `HEALTHCHECK` asks *is it still working*,
+every thirty seconds, for as long as the container lives, and is what makes
+`docker ps` say `healthy` rather than only `Up`.
+
+Point it at the same endpoint `health-url` uses. Slim base images ship neither
+`curl` nor `wget`, and installing one just for this is not worth the layer —
+use the runtime that's already in there:
+
+```dockerfile
+# python:slim
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8081/api/health', timeout=4)"]
+```
+
+```dockerfile
+# a Go or Rust binary on scratch/distroless — give the binary a health subcommand
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["/app", "healthcheck"]
+```
+
+Set `--start-period` to roughly how long a cold start takes; failures during it
+don't count against `--retries`.
+
+**It does not restart anything.** Docker's `restart:` policy reacts to a
+container *exiting*, not to one going unhealthy, so a wedged-but-running
+container stays up and unhealthy until something acts on it. What the
+healthcheck buys is that `docker ps` tells you so, and that anything watching
+the box can act on it.
 
 ### 1. The workflow file
 
